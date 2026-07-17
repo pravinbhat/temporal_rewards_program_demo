@@ -125,17 +125,17 @@ mvn test
 
 ## How It Maps to Temporal Concepts
 
-| Rewards Program Concept     | Temporal Mechanism                                                        |
-|-----------------------------|---------------------------------------------------------------------------|
-| Customer enrolling          | `WorkflowClient.start()` — begins the Entity Workflow                    |
-| Customer's points & level   | In-memory workflow state (durable via Event History)                      |
-| Earning points              | `@SignalMethod earnPoints(int)`                                           |
-| Querying current tier       | `@QueryMethod getCurrentLevel()`                                          |
-| Querying total points       | `@QueryMethod getTotalPoints()`                                           |
-| Leaving the program         | `@SignalMethod leaveProgram()` — sets exit flag, unblocks `Workflow.await()` |
-| Persisting a transaction    | `@ActivityInterface` with automatic retries                               |
-| Worker crash / restart      | Temporal replays Event History → state fully restored, zero data loss     |
-| Exactly-once point credit   | Temporal's idempotent signal delivery + deterministic replay              |
+| Rewards Program Concept   | Temporal Mechanism                                                           |
+| ---------------------------| ------------------------------------------------------------------------------|
+| Customer enrolling        | `WorkflowClient.start()` — begins the Entity Workflow                        |
+| Customer's points & level | In-memory workflow state (durable via Event History)                         |
+| Earning points            | `@SignalMethod earnPoints(int)`                                              |
+| Querying current tier     | `@QueryMethod getCurrentLevel()`                                             |
+| Querying current points   | `@QueryMethod getTotalPoints()`                                              |
+| Leaving the program       | `@SignalMethod leaveProgram()` — sets exit flag, unblocks `Workflow.await()` |
+| Persisting a transaction  | `@ActivityInterface` with automatic retries                                  |
+| Worker crash / restart    | Temporal replays Event History → state fully restored, zero data loss        |
+| Exactly-once point credit | Temporal's idempotent signal delivery + deterministic replay                 |
 
 ---
 
@@ -195,8 +195,10 @@ sequenceDiagram
     WF->>W: schedule ActivityTask
     W->>A: recordPointsTransaction("customer-002", 300)
 
-    S->>T: Query getCurrentLevel() / getTotalPoints()
-    T-->>S: BASIC / 300
+    S->>T: Query getCurrentLevel()
+    T-->>S: BASIC
+    S->>T: Query getTotalPoints()
+    T-->>S: 300
 
     S->>T: Signal earnPoints(250)
     T->>W: deliver WorkflowTask
@@ -204,11 +206,21 @@ sequenceDiagram
     WF->>W: schedule ActivityTask
     W->>A: recordPointsTransaction("customer-002", 250)
 
+    S->>T: Query getCurrentLevel()
+    T-->>S: GOLD
+    S->>T: Query getTotalPoints()
+    T-->>S: 550
+
     S->>T: Signal earnPoints(500)
     T->>W: deliver WorkflowTask
     W->>WF: earnPoints(500) → PLATINUM, 1 050 pts
     WF->>W: schedule ActivityTask
     W->>A: recordPointsTransaction("customer-002", 500)
+
+    S->>T: Query getCurrentLevel()
+    T-->>S: PLATINUM
+    S->>T: Query getTotalPoints()
+    T-->>S: 1050
 
     S->>T: Signal leaveProgram()
     T->>W: deliver WorkflowTask
@@ -226,7 +238,7 @@ stateDiagram-v2
     [*] --> BASIC : enrol (0 pts)
     BASIC --> GOLD : totalPoints ≥ 500
     GOLD --> PLATINUM : totalPoints ≥ 1,000
-    BASIC --> [*] : leaveProgram()
-    GOLD --> [*] : leaveProgram()
+    BASIC    --> [*] : leaveProgram()
+    GOLD     --> [*] : leaveProgram()
     PLATINUM --> [*] : leaveProgram()
 ```
