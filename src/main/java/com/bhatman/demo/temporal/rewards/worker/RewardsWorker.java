@@ -12,9 +12,6 @@ import io.temporal.worker.WorkerFactory;
  * Registers the {@link RewardsWorkflowImpl} and {@link RewardsActivityImpl}
  * with Temporal and manages the lifecycle of the underlying {@link WorkerFactory}.
  *
- * <p>Can be run as a standalone process (keeping the worker alive indefinitely)
- * or embedded inside the demo starter for convenience.
- *
  * <p>Prerequisites: Temporal dev server must be running:
  * {@code temporal server start-dev}
  */

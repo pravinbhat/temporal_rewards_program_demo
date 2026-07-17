@@ -16,6 +16,5 @@ public class RewardsActivityImpl implements RewardsActivity {
     @Override
     public void recordPointsTransaction(String customerId, int points) {
         log.info("Recording points transaction: customer={}, points={}", customerId, points);
-        // TODO: persist to database / emit event
     }
 }

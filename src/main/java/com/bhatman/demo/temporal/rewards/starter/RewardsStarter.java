@@ -7,29 +7,14 @@ import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 
-/**
- * Demo runner for the Rewards Program workflow.
- *
- * <p>This class starts an embedded worker, enrols a customer, sends several
- * point-earning signals, queries the current level between signals, and finally
- * signals the customer to leave the program.
- *
- * <p>Prerequisites: Temporal dev server must be running:
- * {@code temporal server start-dev}
- */
+/** Demo client — enrols a customer, earns points, queries level, then leaves. */
 public class RewardsStarter {
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
 
-        // Connect to the locally running Temporal server
         WorkflowServiceStubs service = WorkflowServiceStubs.newLocalServiceStubs();
         WorkflowClient client = WorkflowClient.newInstance(service);
 
-        // Start the worker (registers workflow + activity on the task queue)
-        RewardsWorker worker = new RewardsWorker(client);
-        worker.start();
-
-        // Build a typed workflow stub for a new customer
         String customerId = "customer-002";
         RewardsWorkflow workflow = client.newWorkflowStub(
                 RewardsWorkflow.class,
@@ -38,26 +23,19 @@ public class RewardsStarter {
                         .setWorkflowId("rewards-" + customerId)
                         .build());
 
-        // 1. Enrol the customer (starts the workflow — Basic tier)
         WorkflowClient.start(workflow::startRewardsProgram, customerId);
 
-        // 2. Signal 300 points earned → still Basic
         workflow.earnPoints(300);
         printState(customerId, workflow);
 
-        // 3. Signal 250 more points → promoted to Gold (550 total)
         workflow.earnPoints(250);
         printState(customerId, workflow);
 
-        // 4. Signal 500 more points → promoted to Platinum (1 050 total)
         workflow.earnPoints(500);
         printState(customerId, workflow);
 
-        // 5. Customer leaves the program (workflow completes gracefully)
         workflow.leaveProgram();
         System.out.printf("Customer %s has left the rewards program.%n", customerId);
-
-        worker.stop();
     }
 
     private static void printState(String customerId, RewardsWorkflow workflow) {
