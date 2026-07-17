@@ -36,6 +36,7 @@ three tiers:
 | Maven                   | 3.9.x                                             |
 | Temporal Java SDK       | 1.37.0                                            |
 | Temporal Server (local) | temporal version 1.7.2 (Server 1.31.1, UI 2.49.1) |
+| Logging                 | slf4j-nop 2.0.x                                   |
 
 ---
 
@@ -63,8 +64,10 @@ The Web UI will be available at <http://localhost:8233>.
 mvn clean package -q
 ```
 
-### 3. Run the Unit Tests
+### 3. Run the App
 
 ```bash
-mvn test
+mvn compile exec:java -Dexec.mainClass="com.bhatman.demo.temporal.rewards.RewardsApp"
 ```
+
+This enrols a customer, earns points in four increments (50 → +250 → +350 → +550), and queries the tier after each step — walking through all three tiers (Basic → Gold → Platinum).
