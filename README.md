@@ -100,10 +100,18 @@ mvn compile exec:java -Dexec.mainClass="com.bhatman.demo.temporal.rewards.worker
 
 ### 4. Run the Demo Starter
 
-In a **separate terminal**, run the starter:
+In a **separate terminal**, run the starter.
+
+**Default** (uses the built-in sample customer `BhatMan-Returns-007`):
 
 ```bash
 mvn compile exec:java -Dexec.mainClass="com.bhatman.demo.temporal.rewards.starter.RewardsStarter"
+```
+
+**Custom customer** (pass any customer ID as the first argument):
+
+```bash
+mvn compile exec:java -Dexec.mainClass="com.bhatman.demo.temporal.rewards.starter.RewardsStarter" -Dexec.args="customer-42"
 ```
 
 The starter will:

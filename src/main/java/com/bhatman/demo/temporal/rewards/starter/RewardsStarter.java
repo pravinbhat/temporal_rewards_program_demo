@@ -15,7 +15,7 @@ public class RewardsStarter {
         WorkflowServiceStubs service = WorkflowServiceStubs.newLocalServiceStubs();
         WorkflowClient client = WorkflowClient.newInstance(service);
 
-        String customerId = "customer-002";
+        String customerId = (args.length > 0) ? args[0] : "BhatMan-Returns-007";
         RewardsWorkflow workflow = client.newWorkflowStub(
                 RewardsWorkflow.class,
                 WorkflowOptions.newBuilder()
