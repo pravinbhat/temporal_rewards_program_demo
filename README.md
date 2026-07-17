@@ -1,7 +1,7 @@
 # Temporal Rewards Program Demo
 
 A Java demonstration project showing how [Temporal](https://temporal.io) elegantly solves the hard
-problems of **distributed, long-running, stateful services** — using a customer Rewards Program as
+problems of **distributed, long-running, stateful services** — using a Retail Rewards Program as
 the driving use-case.
 
 ---
@@ -15,7 +15,7 @@ three tiers:
 | --------------| --------------------------|
 | **Basic**    | 0 (default on enrolment) |
 | **Gold**     | ≥ 500                    |
-| **Platinum** | ≥ 1 000                  |
+| **Platinum** | ≥ 1,000                  |
 
 ### Business Rules
 
@@ -92,7 +92,7 @@ mvn clean package
 
 ### 3. Start the Worker
 
-In one terminal, start the worker process. It will keep running and poll the task queue:
+In **one terminal**, start the worker process. It will keep running and poll the task queue:
 
 ```bash
 mvn compile exec:java -Dexec.mainClass="com.bhatman.demo.temporal.rewards.worker.RewardsWorker"
@@ -110,7 +110,7 @@ The starter will:
 1. Enrol a new customer (starts the workflow — **Basic** tier, 0 points).
 2. Signal 300 points earned → still **Basic** (300 total).
 3. Signal 250 more points → promoted to **Gold** (550 total).
-4. Signal 500 more points → promoted to **Platinum** (1 050 total).
+4. Signal 500 more points → promoted to **Platinum** (1,050 total).
 5. Signal the customer to leave the program (workflow completes).
 
 ### 5. Run the Unit Tests
@@ -136,3 +136,97 @@ mvn test
 | Persisting a transaction    | `@ActivityInterface` with automatic retries                               |
 | Worker crash / restart      | Temporal replays Event History → state fully restored, zero data loss     |
 | Exactly-once point credit   | Temporal's idempotent signal delivery + deterministic replay              |
+
+---
+
+## Diagrams
+
+### Architecture
+
+```mermaid
+graph TD
+    subgraph "Client Process"
+        S["RewardsStarter"]
+    end
+
+    subgraph "Temporal Server"
+        TS["Temporal Service\nlocalhost:7233"]
+        TQ["Task Queue\nREWARDS_TASK_QUEUE\n(WorkflowTasks + ActivityTasks)"]
+        EH["Event History\n(Durable State)"]
+    end
+
+    subgraph "Worker Process"
+        W["RewardsWorker\n(polls & dispatches)"]
+        WF["RewardsWorkflowImpl\n(workflow logic + emits commands)"]
+        AC["RewardsActivityImpl\n(side effects, called via ActivityTask)"]
+    end
+
+    S -- "start() / signal / query" --> TS
+    TS -- "appends events to" --> EH
+    TS -- "schedules WorkflowTask onto" --> TQ
+    TQ -- "delivers WorkflowTask" --> W
+    W -- "replays EH & drives" --> WF
+    WF -- "emits ActivityScheduled command" --> TS
+    TS -- "schedules ActivityTask onto" --> TQ
+    TQ -- "delivers ActivityTask" --> W
+    W -- "executes" --> AC
+```
+
+---
+
+### Sequence: Demo Walkthrough
+
+```mermaid
+sequenceDiagram
+    actor S as RewardsStarter
+    participant T as Temporal Server
+    participant W as RewardsWorker
+    participant WF as RewardsWorkflowImpl
+    participant A as RewardsActivityImpl
+
+    S->>T: WorkflowClient.start("customer-002")
+    T->>W: deliver WorkflowTask
+    W->>WF: startRewardsProgram() → BASIC, 0 pts
+    Note over WF: Workflow.await(programEnded == true)
+
+    S->>T: Signal earnPoints(300)
+    T->>W: deliver WorkflowTask
+    W->>WF: earnPoints(300) → BASIC, 300 pts
+    WF->>W: schedule ActivityTask
+    W->>A: recordPointsTransaction("customer-002", 300)
+
+    S->>T: Query getCurrentLevel() / getTotalPoints()
+    T-->>S: BASIC / 300
+
+    S->>T: Signal earnPoints(250)
+    T->>W: deliver WorkflowTask
+    W->>WF: earnPoints(250) → GOLD, 550 pts
+    WF->>W: schedule ActivityTask
+    W->>A: recordPointsTransaction("customer-002", 250)
+
+    S->>T: Signal earnPoints(500)
+    T->>W: deliver WorkflowTask
+    W->>WF: earnPoints(500) → PLATINUM, 1 050 pts
+    WF->>W: schedule ActivityTask
+    W->>A: recordPointsTransaction("customer-002", 500)
+
+    S->>T: Signal leaveProgram()
+    T->>W: deliver WorkflowTask
+    W->>WF: leaveProgram() → programEnded = true
+    Note over WF: Workflow.await() unblocks → workflow completes
+    WF-->>T: Workflow execution complete
+```
+
+---
+
+### State Machine: Reward Tiers
+
+```mermaid
+stateDiagram-v2
+    [*] --> BASIC : enrol (0 pts)
+    BASIC --> GOLD : totalPoints ≥ 500
+    GOLD --> PLATINUM : totalPoints ≥ 1,000
+    BASIC --> [*] : leaveProgram()
+    GOLD --> [*] : leaveProgram()
+    PLATINUM --> [*] : leaveProgram()
+```
