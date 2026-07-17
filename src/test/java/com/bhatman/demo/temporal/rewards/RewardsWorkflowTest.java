@@ -5,7 +5,6 @@ import com.bhatman.demo.temporal.rewards.model.RewardLevel;
 import com.bhatman.demo.temporal.rewards.workflow.RewardsWorkflow;
 import com.bhatman.demo.temporal.rewards.workflow.RewardsWorkflowImpl;
 
-import io.temporal.client.WorkflowClient;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.testing.TestWorkflowExtension;
@@ -20,19 +19,11 @@ import java.util.concurrent.CompletableFuture;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Unit tests for {@link RewardsWorkflowImpl}.
- *
- * <p>Uses {@link TestWorkflowEnvironment} — no running Temporal server required.
- * Signals, queries, and tier promotions are verified without any network I/O.
- *
- * <p>Pattern: each test creates a fresh typed workflow stub via
- * {@link WorkflowClient#newWorkflowStub}, starts the {@code @WorkflowMethod} on a
- * background thread (so it can block on {@code Workflow.await}), then freely sends
- * signals and runs queries from the test thread.
+ * Unit tests for {@link RewardsWorkflowImpl} using {@link TestWorkflowEnvironment}.
+ * No running Temporal server required.
  */
 class RewardsWorkflowTest {
 
-    /** No-op activity — avoids real side-effects in tests. */
     private static final RewardsActivity ACTIVITY_STUB = (customerId, points) -> { /* no-op */ };
 
     @RegisterExtension
@@ -42,33 +33,37 @@ class RewardsWorkflowTest {
             .setUseTimeskipping(false)
             .build();
 
-    // -----------------------------------------------------------------------
-    // Helper — creates a new stub and starts startRewardsProgram in the background
-    // -----------------------------------------------------------------------
-    private static RewardsWorkflow newWorkflow(TestWorkflowEnvironment env, Worker worker) {
+    // --- Helpers ---
+
+    private static RewardsWorkflow newWorkflow(TestWorkflowEnvironment env, Worker worker, String workflowId) {
         return env.getWorkflowClient().newWorkflowStub(
                 RewardsWorkflow.class,
                 WorkflowOptions.newBuilder()
                         .setTaskQueue(worker.getTaskQueue())
-                        .setWorkflowId("test-" + UUID.randomUUID())
+                        .setWorkflowId(workflowId)
                         .build());
     }
 
-    private static CompletableFuture<Void> enrolAsync(RewardsWorkflow workflow) {
-        return CompletableFuture.runAsync(() -> workflow.startRewardsProgram("test-customer"));
+    /** Re-attaches to an already-running workflow by workflowId (mirrors earn/leave/status commands). */
+    private static RewardsWorkflow reattach(TestWorkflowEnvironment env, String workflowId) {
+        return env.getWorkflowClient().newWorkflowStub(RewardsWorkflow.class, workflowId);
     }
 
-    // -----------------------------------------------------------------------
-    // Tests
-    // -----------------------------------------------------------------------
+    private static CompletableFuture<Void> enrolAsync(RewardsWorkflow workflow, String customerId) {
+        return CompletableFuture.runAsync(() -> workflow.startRewardsProgram(customerId));
+    }
+
+    // --- Single-interaction tests ---
 
     @Test
     void enrolStartsAtBasicTier(TestWorkflowEnvironment env, Worker worker) throws Exception {
-        RewardsWorkflow workflow = newWorkflow(env, worker);
-        var future = enrolAsync(workflow);
+        String id = "test-" + UUID.randomUUID();
+        RewardsWorkflow workflow = newWorkflow(env, worker, id);
+        var future = enrolAsync(workflow, "customer-basic");
         Thread.sleep(200);
 
         assertEquals(RewardLevel.BASIC, workflow.getCurrentLevel());
+        assertEquals(0, workflow.getTotalPoints());
 
         workflow.leaveProgram();
         future.get();
@@ -76,12 +71,12 @@ class RewardsWorkflowTest {
 
     @Test
     void earnPointsPromotesToGold(TestWorkflowEnvironment env, Worker worker) throws Exception {
-        RewardsWorkflow workflow = newWorkflow(env, worker);
-        var future = enrolAsync(workflow);
+        String id = "test-" + UUID.randomUUID();
+        RewardsWorkflow workflow = newWorkflow(env, worker, id);
+        var future = enrolAsync(workflow, "customer-gold");
         Thread.sleep(200);
 
         workflow.earnPoints(500);
-
         assertEquals(RewardLevel.GOLD, workflow.getCurrentLevel());
 
         workflow.leaveProgram();
@@ -90,12 +85,12 @@ class RewardsWorkflowTest {
 
     @Test
     void earnPointsPromotesToPlatinum(TestWorkflowEnvironment env, Worker worker) throws Exception {
-        RewardsWorkflow workflow = newWorkflow(env, worker);
-        var future = enrolAsync(workflow);
+        String id = "test-" + UUID.randomUUID();
+        RewardsWorkflow workflow = newWorkflow(env, worker, id);
+        var future = enrolAsync(workflow, "customer-platinum");
         Thread.sleep(200);
 
         workflow.earnPoints(1_000);
-
         assertEquals(RewardLevel.PLATINUM, workflow.getCurrentLevel());
 
         workflow.leaveProgram();
@@ -104,8 +99,9 @@ class RewardsWorkflowTest {
 
     @Test
     void partialPointsRemainBasic(TestWorkflowEnvironment env, Worker worker) throws Exception {
-        RewardsWorkflow workflow = newWorkflow(env, worker);
-        var future = enrolAsync(workflow);
+        String id = "test-" + UUID.randomUUID();
+        RewardsWorkflow workflow = newWorkflow(env, worker, id);
+        var future = enrolAsync(workflow, "customer-partial");
         Thread.sleep(200);
 
         workflow.earnPoints(200);
@@ -118,37 +114,73 @@ class RewardsWorkflowTest {
     }
 
     @Test
-    void multiStepPromotionFlow(TestWorkflowEnvironment env, Worker worker) throws Exception {
-        RewardsWorkflow workflow = newWorkflow(env, worker);
-        var future = enrolAsync(workflow);
+    void leaveProgramCompletesWorkflow(TestWorkflowEnvironment env, Worker worker) throws Exception {
+        String id = "test-" + UUID.randomUUID();
+        RewardsWorkflow workflow = newWorkflow(env, worker, id);
+        var future = enrolAsync(workflow, "customer-leave");
         Thread.sleep(200);
 
         workflow.earnPoints(300);
-        assertEquals(RewardLevel.BASIC, workflow.getCurrentLevel());
-        assertEquals(300, workflow.getTotalPoints());
-
-        workflow.earnPoints(250); // 550 total
-        assertEquals(RewardLevel.GOLD, workflow.getCurrentLevel());
-        assertEquals(550, workflow.getTotalPoints());
-
-        workflow.earnPoints(500); // 1 050 total
-        assertEquals(RewardLevel.PLATINUM, workflow.getCurrentLevel());
-        assertEquals(1_050, workflow.getTotalPoints());
-
         workflow.leaveProgram();
         future.get();
     }
 
+    // --- Multi-execution tests (simulated separate JVM invocations) ---
+
     @Test
-    void leaveProgramCompletesWorkflow(TestWorkflowEnvironment env, Worker worker) throws Exception {
-        RewardsWorkflow workflow = newWorkflow(env, worker);
-        var future = enrolAsync(workflow);
+    void multiExecutionFullDemoFlow(TestWorkflowEnvironment env, Worker worker) throws Exception {
+        String workflowId = "demo-" + UUID.randomUUID();
+
+        // Execution 1: join
+        RewardsWorkflow joinStub = newWorkflow(env, worker, workflowId);
+        var future = enrolAsync(joinStub, "customer-demo");
+        Thread.sleep(200);
+        assertEquals(RewardLevel.BASIC, joinStub.getCurrentLevel());
+        assertEquals(0, joinStub.getTotalPoints());
+
+        // Execution 2: earn 300 → Basic (300 total)
+        RewardsWorkflow exec2 = reattach(env, workflowId);
+        exec2.earnPoints(300);
+        assertEquals(RewardLevel.BASIC, exec2.getCurrentLevel());
+        assertEquals(300, exec2.getTotalPoints());
+
+        // Execution 3: earn 250 → Gold (550 total)
+        RewardsWorkflow exec3 = reattach(env, workflowId);
+        exec3.earnPoints(250);
+        assertEquals(RewardLevel.GOLD, exec3.getCurrentLevel());
+        assertEquals(550, exec3.getTotalPoints());
+
+        // Execution 4: earn 500 → Platinum (1050 total)
+        RewardsWorkflow exec4 = reattach(env, workflowId);
+        exec4.earnPoints(500);
+        assertEquals(RewardLevel.PLATINUM, exec4.getCurrentLevel());
+        assertEquals(1_050, exec4.getTotalPoints());
+
+        // Execution 5: leave
+        RewardsWorkflow exec5 = reattach(env, workflowId);
+        exec5.leaveProgram();
+        future.get();
+    }
+
+    @Test
+    void statusQueryDoesNotMutateState(TestWorkflowEnvironment env, Worker worker) throws Exception {
+        String workflowId = "status-" + UUID.randomUUID();
+
+        RewardsWorkflow joinStub = newWorkflow(env, worker, workflowId);
+        var future = enrolAsync(joinStub, "customer-status");
         Thread.sleep(200);
 
-        workflow.earnPoints(300);
-        workflow.leaveProgram();
+        joinStub.earnPoints(600); // → Gold
 
-        // Workflow should complete cleanly — future.get() would throw if it didn't
+        RewardsWorkflow statusStub = reattach(env, workflowId);
+        assertEquals(RewardLevel.GOLD, statusStub.getCurrentLevel());
+        assertEquals(600, statusStub.getTotalPoints());
+
+        // Re-query — state unchanged
+        assertEquals(RewardLevel.GOLD, statusStub.getCurrentLevel());
+        assertEquals(600, statusStub.getTotalPoints());
+
+        statusStub.leaveProgram();
         future.get();
     }
 }
